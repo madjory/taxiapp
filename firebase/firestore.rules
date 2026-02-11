@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users collection — riders
+    match /users/{userId} {
+      // Users can read and update their own document
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      // No client delete
+      allow delete: if false;
+    }
+
+    // Drivers collection
+    match /drivers/{driverId} {
+      // Drivers can read their own doc
+      allow read: if request.auth != null && request.auth.uid == driverId;
+      // Drivers can update their own doc but cannot change isApproved
+      allow create: if request.auth != null && request.auth.uid == driverId
+                    && !('isApproved' in request.resource.data
+                         && request.resource.data.isApproved == true);
+      allow update: if request.auth != null && request.auth.uid == driverId
+                    && (!('isApproved' in request.resource.data)
+                        || request.resource.data.isApproved == resource.data.isApproved);
+      allow delete: if false;
+
+      // Riders can read basic driver info (for nearby drivers list)
+      // but phone is filtered out by Cloud Functions, not rules
+      // Allow authenticated users to read driver docs for discovery
+      allow read: if request.auth != null;
+    }
+
+    // Rides collection
+    match /rides/{rideId} {
+      // Riders can create ride requests
+      allow create: if request.auth != null
+                    && request.resource.data.riderId == request.auth.uid
+                    && request.resource.data.status == 'requested';
+
+      // Riders can read their own rides
+      allow read: if request.auth != null
+                  && (resource.data.riderId == request.auth.uid
+                      || resource.data.driverId == request.auth.uid);
+
+      // Drivers can update rides assigned to them (accept, in_progress, complete)
+      allow update: if request.auth != null
+                    && resource.data.driverId == request.auth.uid
+                    && request.resource.data.status in ['accepted', 'in_progress', 'completed'];
+
+      // Riders can cancel their own rides
+      allow update: if request.auth != null
+                    && resource.data.riderId == request.auth.uid
+                    && request.resource.data.status == 'cancelled'
+                    && resource.data.status in ['requested', 'accepted'];
+
+      allow delete: if false;
+    }
+
+    // Deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
